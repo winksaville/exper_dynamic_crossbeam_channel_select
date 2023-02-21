@@ -2,90 +2,151 @@ use crossbeam_channel::{unbounded, Select, Receiver, Sender};
 
 use std::{fmt::Debug, any::Any};
 
-#[allow(unused)]
-fn simple() {
-    println!("simple:+");
+pub type BoxMsgAny = Box<dyn Any + Send>;
 
-    let (s1, r1) = unbounded::<i32>();
-    let (s2, r2) = unbounded::<i32>();
+#[derive(Debug)]
+struct MsgSum {
+    v: i32,
+}
 
-    std::thread::scope(|scope| {
-        //println!("outer thread:+");
+#[derive(Debug)]
+struct MsgReqSum;
 
-        scope.spawn(|| {
-            //println!("t1:+");
-
-            let mut sel = Select::new();
-
-            // Add r1 and get 2 messages
-            let oper1 = sel.recv(&r1);
-            for li in 1..=2 {
-                //println!("t1: TOL1");
-                let oper = sel.select();
-                match oper.index() {
-                    i if i == oper1 => {
-                        let oper1_v = oper.recv(&r1).unwrap();
-                        //println!("t1: oper1_v={oper1_v}");
-                        assert_eq!(li, oper1_v);
-                    }
-                    _ => unreachable!(),
-                }
-            }
-
-            // Add r2 and get 2 messages
-            let oper2 = sel.recv(&r2);
-            for _ in 3..=4 {
-                //println!("t1: TOL2");
-                let oper = sel.select();
-                match oper.index() {
-                    i if i == oper1 => {
-                        let oper1_v = oper.recv(&r1).unwrap();
-                        //println!("t1: oper1_v={oper1_v}");
-                        assert_eq!(oper1_v, 3);
-                    }
-                    i if i == oper2 => {
-                        let oper2_v = oper.recv(&r2).unwrap();
-                        //println!("t1: oper2_v={oper2_v}");
-                        assert_eq!(oper2_v, 4);
-                    }
-                    _ => unreachable!(),
-                }
-            }
-
-            // Remove r1 get one message on r2
-            sel.remove(oper1);
-            for _ in 5..=5 {
-                //println!("t1: TOL3");
-                let oper = sel.select();
-                match oper.index() {
-                    i if i == oper2 => {
-                        let oper2_v = oper.recv(&r2).unwrap();
-                        //println!("t1: oper2_v={oper2_v}");
-                        assert_eq!(oper2_v, 5);
-                    }
-                    _ => unreachable!(),
-                }
-            }
-
-            //println!("t1:-");
-        });
-
-        s1.send(1).unwrap();
-        s1.send(2).unwrap();
-        s1.send(3).unwrap();
-        s2.send(4).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        s2.send(5).unwrap();
-
-        //println!("outer thread:-");
-    });
-
-    println!("simple:-");
+#[derive(Debug)]
+struct MsgRspSum {
+    sum: i128,
 }
 
 
+#[derive(Debug)]
+struct MsgReqAddWorker {
+    worker: Box<dyn Worker>,
+    rsp_tx: Sender<BoxMsgAny>
+}
+
+#[derive(Debug)]
+struct MsgRspAddWorker {
+    tx: Sender<BoxMsgAny>,
+    rx: Receiver<BoxMsgAny>,
+}
+
+#[derive(Debug)]
+struct MsgDone;
+
+trait Worker: Send + Debug {
+    fn do_work(&mut self, rsp_tx: &Sender<BoxMsgAny>, msg: BoxMsgAny);
+}
+
+#[derive(Debug)]
+struct Summer {
+    sum: i128,
+}
+
+impl Worker for Summer {
+    fn do_work(&mut self, rsp_tx: &Sender<BoxMsgAny>, msg_any: BoxMsgAny) {
+        if let Some(msg) = msg_any.downcast_ref::<MsgSum>() {
+            self.sum += msg.v as i128;
+        } else if msg_any.downcast_ref::<MsgReqSum>().is_some() {
+            rsp_tx.send(Box::new(MsgRspSum { sum: self.sum })).unwrap();
+        } else {
+            println!("Summer.do_work: unknown msg_any, expected MsgSum");
+        }
+    }
+}
+
+fn worker() {
+    println!("worker:+");
+
+    let (ws, wr) = unbounded::<BoxMsgAny>();
+
+    std::thread::scope(|scope| {
+        println!("worker outer thread:+");
+
+        scope.spawn(|| {
+            println!("worker_t1:+");
+
+            let mut workers: Vec<Box<dyn Worker>> = Vec::new();
+            let mut worker_our_receivers: Vec<Receiver<BoxMsgAny>> = Vec::new();
+            let mut worker_our_senders: Vec<Sender<BoxMsgAny>> = Vec::new();
+
+            let mut sel = Select::new();
+            let worker_t1 = sel.recv(&wr);
+
+            loop {
+                // Get Worker's
+                let oper = sel.select();
+                match oper.index() {
+                    i if i == worker_t1 => {
+                        let msg_any = oper.recv(&wr).unwrap();
+                        if let Some(msg) = msg_any.downcast_ref::<MsgReqAddWorker>() {
+                            println!("worker_t1: msg={msg:?}");
+                            let msg = msg_any.downcast::<MsgReqAddWorker>().unwrap();
+                            let (our_tx, their_rx) = unbounded::<BoxMsgAny>();
+                            let (their_tx, our_rx) = unbounded::<BoxMsgAny>();
+                            let msg_rsp = Box::new(MsgRspAddWorker { tx: their_tx, rx: their_rx });
+                            msg.rsp_tx.send(msg_rsp).unwrap();
+                            workers.push(msg.worker);
+                            worker_our_senders.push(our_tx);
+                            worker_our_receivers.push(our_rx);
+                            //sel.recv(worker_our_receivers.last().unwrap());
+                        } else if let Some(msg) = msg_any.downcast_ref::<MsgDone>() {
+                            println!("worker_t1: msg={msg:?}");
+                            break;
+                        } else {
+                            println!("worker_t1: ignoring unreconized msg, expecting MsgAddWorker or MsgDone");
+                        }
+                    }
+                    i if (i - 1) < workers.len() && (i - 1) < worker_our_receivers.len() => {
+                        assert!(i > 0);
+                        let worker_idx = i - 1;
+                        let msg_any = oper.recv(&worker_our_receivers[worker_idx]).unwrap();
+                        let worker = &mut workers[worker_idx];
+                        println!("worker_t1: call worker[{i}].do_work");
+                        worker.do_work(&worker_our_senders[worker_idx], msg_any);
+                        println!("worker_t1: retf worker[{i}].do_work");
+                    }
+                    _ => {
+                        unreachable!();
+                    }
+                }
+            }
+
+            println!("worker_t1:-");
+        });
+
+        let (rsp_tx, rsp_rx) = unbounded::<BoxMsgAny>();
+
+        let s = Box::new(Summer { sum: 0 });
+        let msg_add_worker = Box::new(MsgReqAddWorker { worker: s, rsp_tx });
+        ws.send(msg_add_worker).unwrap();
+        let msg_any = rsp_rx.recv().unwrap();
+        let msg = msg_any.downcast::<MsgRspAddWorker>().unwrap();
+
+        let summer_tx = msg.tx.clone();
+        let summer_rx = msg.rx.clone();
+
+        let msg_sum = Box::new(MsgSum { v: 2 });
+        summer_tx.send(msg_sum).unwrap();
+
+        let msg_sum = Box::new(MsgReqSum);
+        summer_tx.send(msg_sum).unwrap();
+
+        println!("worker outer thread: waiting msg_rsp_sum");
+        let msg_any = summer_rx.recv().unwrap();
+        let msg_rsp_sum= msg_any.downcast::<MsgRspSum>().unwrap();
+        println!("worker outer thread: received msg_rsp_sum={msg_rsp_sum:?}");
+        assert_eq!(msg_rsp_sum.sum, 2);
+
+        let msg_done = Box::new(MsgDone);
+        ws.send(msg_done).unwrap();
+        println!("worker outer thread:-");
+    });
+
+    println!("worker:-");
+}
+
 fn main() {
     println!("main:+");
-    simple();
+    worker();
     println!("main:-");
 }
