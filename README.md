@@ -3,41 +3,45 @@
 Experiment with dynamically adding/remove receivers
 from crossbeam_channel select.
 
-This runs but a new receiver is not added so we hang and
-have to Ctrl-C out of the app:
+Here is a solution, but I pre-allocate the receivers as I did
+in the simple example:
 ```
-wink@3900x 23-02-21T22:00:14.778Z:~/prgs/rust/myrepos/exper_dynamic_crossbeam_channel_select (main|REBASE 2/3)
+wink@3900x 23-02-21T22:26:13.158Z:~/prgs/rust/myrepos/exper_dynamic_crossbeam_channel_select (main)
 $ cargo run
    Compiling exper_dynamic_crossbeam_channel_select v0.1.0 (/home/wink/prgs/rust/myrepos/exper_dynamic_crossbeam_channel_select)
-    Finished dev [unoptimized + debuginfo] target(s) in 0.26s
+    Finished dev [unoptimized + debuginfo] target(s) in 0.25s
      Running `target/debug/exper_dynamic_crossbeam_channel_select`
 main:+
 worker:+
 worker outer thread:+
 worker_t1:+
-worker_t1: msg=MsgReqAddWorker { worker: Summer { sum: 0 }, rsp_tx: Sender { .. } }
+worker_t1: worker_idx=0 msg=MsgReqAddWorker { worker: Summer { sum: 0 }, rsp_tx: Sender { .. } }
 worker outer thread: waiting msg_rsp_sum
-^C
+Summer.do_work:+
+Summer.do_work: before self.sum=0 msg=MsgSum { v: 2 } after self.sum=2
+Summer.do_work:+
+Summer.do_work: msg=MsgReqSum msg_rsp=MsgRspSum { sum: 2 }
+worker outer thread: received msg_rsp_sum=MsgRspSum { sum: 2 }
+worker outer thread:-
+worker_t1: msg=MsgDone
+worker_t1:-
+worker:-
+main:-
 ```
 
-If I uncomment line 91 then I get a compile error:
+Here is the pre-allocation:
 ```
-wink@3900x 23-02-21T22:05:08.677Z:~/prgs/rust/myrepos/exper_dynamic_crossbeam_channel_select (main|REBASE 2/3)
-$ cargo build
-   Compiling exper_dynamic_crossbeam_channel_select v0.1.0 (/home/wink/prgs/rust/myrepos/exper_dynamic_crossbeam_channel_select)
-error[E0502]: cannot borrow `worker_our_receivers` as mutable because it is also borrowed as immutable
-  --> src/main.rs:90:29
-   |
-90 | ...                   worker_our_receivers.push(our_rx);
-   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ mutable borrow occurs here
-91 | ...                   sel.recv(worker_our_receivers.last().unwrap());
-   |                       ----------------------------------------------
-   |                       |        |
-   |                       |        immutable borrow occurs here
-   |                       immutable borrow later used here
-
-For more information about this error, try `rustc --explain E0502`.
-error: could not compile `exper_dynamic_crossbeam_channel_select` due to previous error
+    74              let mut worker_their_receivers: Vec<Receiver<BoxMsgAny>> = Vec::new();
+    75              let mut worker_their_senders: Vec<Sender<BoxMsgAny>> = Vec::new();
+    76              let mut worker_our_receivers: Vec<Receiver<BoxMsgAny>> = Vec::new();
+    77              let mut worker_our_senders: Vec<Sender<BoxMsgAny>> = Vec::new();
+    78              for _ in 1..=10 {
+    79                  let (our_tx, their_rx) = unbounded::<BoxMsgAny>();
+    80                  let (their_tx, our_rx) = unbounded::<BoxMsgAny>();
+    81                  worker_our_senders.push(our_tx);
+    82                  worker_our_receivers.push(our_rx);
+    83                  worker_their_senders.push(their_tx);
+    84                  worker_their_receivers.push(their_rx);```
 ```
 
 ## License
