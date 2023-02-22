@@ -1,88 +1,83 @@
-use crossbeam_channel::{unbounded, Select, Receiver, Sender};
-
-use std::{fmt::Debug, any::Any};
+use crossbeam_channel::{bounded, unbounded, Receiver, Select, Sender};
 
 #[allow(unused)]
 fn simple() {
     println!("simple:+");
 
-    let (s1, r1) = unbounded::<i32>();
-    let (s2, r2) = unbounded::<i32>();
-
     std::thread::scope(|scope| {
-        //println!("outer thread:+");
+        println!("outer thread:+");
 
-        scope.spawn(|| {
-            //println!("t1:+");
+        let (cmd_tx, cmd_rx) = unbounded::<i32>();
+        let (rsp_tx, rsp_rx) = unbounded::<Sender<i32>>();
+        let (done_tx, done_rx) = bounded::<()>(0);
+
+        let mut receiver: Vec<Receiver<i32>> = Vec::new();
+
+        scope.spawn(move || {
+            println!("t1:+");
 
             let mut sel = Select::new();
 
-            // Add r1 and get 2 messages
-            let oper1 = sel.recv(&r1);
+            // From cmd_rx get two i32's
+            let oper1 = sel.recv(&cmd_rx);
             for li in 1..=2 {
-                //println!("t1: TOL1");
+                println!("t1: TOL1");
                 let oper = sel.select();
                 match oper.index() {
                     i if i == oper1 => {
-                        let oper1_v = oper.recv(&r1).unwrap();
-                        //println!("t1: oper1_v={oper1_v}");
+                        let oper1_v = oper.recv(&cmd_rx).unwrap();
+                        println!("t1: oper1_v={oper1_v}");
                         assert_eq!(li, oper1_v);
                     }
                     _ => unreachable!(),
                 }
             }
 
+            let (tx, rx) = unbounded::<i32>();
+            rsp_tx.send(tx);
+            receiver.push(rx);
+            let oper2 = sel.recv(&receiver[0]);
+
             // Add r2 and get 2 messages
-            let oper2 = sel.recv(&r2);
             for _ in 3..=4 {
-                //println!("t1: TOL2");
+                println!("t1: TOL2");
                 let oper = sel.select();
                 match oper.index() {
                     i if i == oper1 => {
-                        let oper1_v = oper.recv(&r1).unwrap();
-                        //println!("t1: oper1_v={oper1_v}");
+                        let oper1_v = oper.recv(&cmd_rx).unwrap();
+                        println!("t1: oper1_v={oper1_v}");
                         assert_eq!(oper1_v, 3);
                     }
                     i if i == oper2 => {
-                        let oper2_v = oper.recv(&r2).unwrap();
-                        //println!("t1: oper2_v={oper2_v}");
+                        let oper2_v = oper.recv(&receiver[0]).unwrap();
+                        println!("t1: oper2_v={oper2_v}");
                         assert_eq!(oper2_v, 4);
                     }
                     _ => unreachable!(),
                 }
             }
 
-            // Remove r1 get one message on r2
-            sel.remove(oper1);
-            for _ in 5..=5 {
-                //println!("t1: TOL3");
-                let oper = sel.select();
-                match oper.index() {
-                    i if i == oper2 => {
-                        let oper2_v = oper.recv(&r2).unwrap();
-                        //println!("t1: oper2_v={oper2_v}");
-                        assert_eq!(oper2_v, 5);
-                    }
-                    _ => unreachable!(),
-                }
-            }
+            done_tx.send(());
 
-            //println!("t1:-");
+            println!("t1:-");
         });
 
-        s1.send(1).unwrap();
-        s1.send(2).unwrap();
-        s1.send(3).unwrap();
-        s2.send(4).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        s2.send(5).unwrap();
+        cmd_tx.send(1).unwrap();
+        cmd_tx.send(2).unwrap();
+        cmd_tx.send(3).unwrap();
 
-        //println!("outer thread:-");
+        println!("outer thread: waiting for rev other_cmd_tx");
+        let other_cmd_tx = rsp_rx.recv().unwrap();
+        println!("outer thread:    received rev other_cmd_tx");
+        other_cmd_tx.send(4).unwrap();
+        //other_cmd_tx.send(5).unwrap();
+
+        done_rx.recv().unwrap();
+        println!("outer thread:-");
     });
 
     println!("simple:-");
 }
-
 
 fn main() {
     println!("main:+");
