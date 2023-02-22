@@ -1,36 +1,20 @@
+use std::cell::RefCell;
+
 use crossbeam_channel::{unbounded, Receiver, Select};
 
 fn main() {
-    println!("main:+");
-    type BoxMsgAny = Box<dyn std::any::Any + Send>;
-
-    let (_cmd_tx, cmd_rx) = unbounded::<BoxMsgAny>();
-
     let mut sel = Select::new();
-    let mut receivers: Vec<Receiver<BoxMsgAny>> = Vec::new();
+    let receivers: RefCell<Vec<Receiver<i32>>> = RefCell::new(Vec::new());
 
-    receivers.push(cmd_rx);
-    sel.recv(&receivers[0]);
+    // Allocate first receiver
+    let (_tx1, rx1) = unbounded::<i32>();
+    receivers.borrow_mut().push(rx1);
+    let rx = &receivers.borrow()[0];
+    sel.recv(rx);
 
-    let (_tx, rx) = unbounded::<BoxMsgAny>();
-
-    // $ cargo run
-    //    Compiling exper_dynamic_crossbeam_channel_select v0.1.0 (/home/wink/prgs/rust/myrepos/exper_dynamic_crossbeam_channel_select)
-    // error[E0502]: cannot borrow `receivers` as mutable because it is also borrowed as immutable
-    //   --> src/main.rs:32:5
-    //    |
-    // 13 |     sel.recv(&receivers[0]);
-    //    |               --------- immutable borrow occurs here
-    // ...
-    // 32 |     receivers.push(rx);
-    //    |     ^^^^^^^^^^^^^^^^^^ mutable borrow occurs here
-    // 33 |     sel.recv(&receivers[0]);
-    //    |     ----------------------- immutable borrow later used here
-    // 
-    // For more information about this error, try `rustc --explain E0502`.
-    // error: could not compile `exper_dynamic_crossbeam_channel_select` due to previous error
-    receivers.push(rx);
-    //sel.recv(&receivers[0]);
-
-    println!("main:-");
+    // Allocate next receiver sometime in the future
+    let (_tx2, rx2) = unbounded::<i32>();
+    receivers.borrow_mut().push(rx2);
+    let rx = &receivers.borrow()[1];
+    sel.recv(rx);
 }
