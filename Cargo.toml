@@ -7,3 +7,10 @@ edition = "2021"
 
 [dependencies]
 crossbeam-channel = "0.5.6"
+
+[features]
+default = []
+cerr1 = []
+cerr2 = []
+cerr3 = []
+cerr4 = []
