@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crossbeam_channel::{unbounded, Receiver}; //, Select};
+use crossbeam_channel::{unbounded, Receiver, Select};
 
 //fn add_to_sel<'a>(sel: &'a mut Select<'a>, rx: &'a Receiver<i32>) {
 //    println!("add_to_sel: rx={:p}", rx);
@@ -8,7 +8,7 @@ use crossbeam_channel::{unbounded, Receiver}; //, Select};
 //}
 
 fn main() {
-    //let mut sel = Select::new();
+    let mut sel = Select::new();
 
     let receivers: Rc<RefCell<Vec<Receiver<i32>>>> = Rc::new(RefCell::new(Vec::new()));
 
@@ -22,14 +22,16 @@ fn main() {
         receivers.borrow_mut().push(rx1);
         let r_rx1 = &(*receivers).borrow()[0];
         println!("&*r_rx1={:p}", r_rx1);
-        //sel.recv(r_rx1);
+        sel.recv(r_rx1);
+        println!("after sel.recv(r_rx1)");
     }
 
     {
         receivers.borrow_mut().push(rx2);
         let r_rx2 = &(*receivers).borrow()[1];
         println!("&*r_rx2={:p}", &*r_rx2);
-        //sel.recv(r_rx2);
+        //sel.recv(r_rx2); // If enabled error[E0716] on line 23
+        println!("after sel.recv(r_rx2)");
     }
 
     println!("receivers.len()={}", (*receivers).borrow().len());
