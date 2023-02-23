@@ -1,33 +1,55 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, rc::Rc};
 
-use crossbeam_channel::{unbounded, Receiver, Select};
+use crossbeam_channel::{unbounded, Receiver}; //, Select};
 
-fn add_to_sel<'a>(sel: &'a mut Select<'a>, rx: &'a Receiver<i32>) {
-    println!("add_to_sel: rx={:p}", rx);
-    sel.recv(rx);
-}
+//fn add_to_sel<'a>(sel: &'a mut Select<'a>, rx: &'a Receiver<i32>) {
+//    println!("add_to_sel: rx={:p}", rx);
+//    sel.recv(rx);;
+//}
 
 fn main() {
-    let mut sel = Select::new();
+    //let mut sel = Select::new();
 
-    let receivers: RefCell<Vec<Receiver<i32>>> = RefCell::new(Vec::new());
+    let receivers: Rc<RefCell<Vec<Receiver<i32>>>> = Rc::new(RefCell::new(Vec::new()));
+
+    //let (_tx1, rx1) = unbounded::<i32>();
+    //let (_tx2, rx2) = unbounded::<i32>();
 
     let (_tx1, rx1) = unbounded::<i32>();
     let (_tx2, rx2) = unbounded::<i32>();
 
-    receivers.borrow_mut().push(rx1);
-    receivers.borrow_mut().push(rx2);
+    {
+        receivers.borrow_mut().push(rx1);
+        let r_rx1 = &(*receivers).borrow()[0];
+        println!("&*r_rx1={:p}", r_rx1);
+        //sel.recv(r_rx1);
+    }
 
-    let r_rx1 = &receivers.borrow()[0];
-    let r_rx2 = &receivers.borrow()[1];
+    {
+        receivers.borrow_mut().push(rx2);
+        let r_rx2 = &(*receivers).borrow()[1];
+        println!("&*r_rx2={:p}", &*r_rx2);
+        //sel.recv(r_rx2);
+    }
 
-    println!("&*r_rx1={:p}", &*r_rx1);
-    println!("&*r_rx1={:p}", &r_rx1);
-    println!("&*r_rx2={:p}", &*r_rx2);
+    println!("receivers.len()={}", (*receivers).borrow().len());
 
-    add_to_sel(&'a mut sel, r_rx1);
+    //let receivers: RefCell<Vec<Receiver<i32>>> = RefCell::new(Vec::new());
+    //let (_tx1, rx1) = unbounded::<i32>();
+    //let (_tx2, rx2) = unbounded::<i32>();
+
+    //receivers.borrow_mut().push(rx1);
+    //receivers.borrow_mut().push(rx2);
+
+    //let r_rx1 = &receivers.borrow()[0];
+    //let r_rx2 = &receivers.borrow()[1];
+
+    //println!("&*r_rx1={:p}", &*r_rx1);
+    //println!("&*r_rx2={:p}", &*r_rx2);
+
+    //add_to_sel(&'a mut sel, r_rx1);
     //sel.recv(r_rx1);
-    sel.recv(r_rx2);
+    //sel.recv(r_rx2);
 
     //// Allocate first receiver
     //let (_tx1, rx1) = unbounded::<i32>();
